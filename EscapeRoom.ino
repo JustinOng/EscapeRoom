@@ -1,109 +1,122 @@
 #include <SPI.h>
 #include <MFRC522.h>
- 
-constexpr uint8_t RST_PIN = 10;     // Configurable, see typical pin layout above
-constexpr uint8_t SS_0_PIN = 9;   // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 2
-constexpr uint8_t SS_1_PIN = 8;    // Configurable, take a unused pin, only HIGH/LOW required, must be diffrent to SS 1
-constexpr uint8_t SS_2_PIN = 7;
-constexpr uint8_t SS_3_PIN = 6;
-constexpr uint8_t SS_4_PIN = 5;
-constexpr uint8_t SS_5_PIN = 4;
- 
-String card0 = "04 1D F6 0A D7 49 81";
-String card1 = "04 3B E5 0A D7 49 81";
-String card2 = "04 09 D2 0A D7 49 81";
-String card3 = "04 E2 F1 0A D7 49 80";
-String card4 = "04 2C D6 0A D7 49 81";
-String card5 = "04 C3 F4 0A D7 49 80";
- 
-constexpr uint8_t NR_OF_READERS = 6;
- 
-byte ssPins[] = {SS_0_PIN, SS_1_PIN, SS_2_PIN, SS_3_PIN, SS_4_PIN, SS_5_PIN};
-String cards[]= {card0,card1,card2,card3,card4,card5};
- 
- 
-MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
- 
-int DELAY_TIME_MILLI = 1000;
- 
-/**
- * Initialize.
- */
-void setup() {
- 
-  Serial.begin(9600); // Initialize serial communications with the PC
-  while (!Serial);    // Do nothing if no serial port is opened (added for Arduinos based on ATMEGA32U4)
- 
-  SPI.begin();        // Init SPI bus
- 
-  initialize_readers();
-}
 
-void initialize_readers() {
-   
+#define NR_OF_READERS   2
+
+// how long to keep output high upon all readers being correct in ms
+// set to -1 for infinite
+#define OUTPUT_TIME -1
+
+// refer to https://github.com/esp8266/Arduino/blob/master/variants/d1_mini/pins_arduino.h#L49-L61 for valid pins
+byte ssPins[] = {D8, D0};
+
+MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
+
+void setup() {
+  delay(100);
+  Serial.begin(115200, SERIAL_8N1, SERIAL_TX_ONLY, 1);
+  Serial.println();
+
+  // set frequency lower to attempt to solve some data corruption
+  SPI.setFrequency(1000000);
+  SPI.begin();
+
   for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
-    mfrc522[reader].PCD_Init(ssPins[reader], RST_PIN); // Init each MFRC522 card
+    mfrc522[reader].PCD_Init(ssPins[reader], 255); // Init each MFRC522 card with 255 as rst pin so is not used
     Serial.print(F("Reader "));
     Serial.print(reader);
     Serial.print(F(": "));
     mfrc522[reader].PCD_DumpVersionToSerial();
   }
 }
- 
-/**
- * Main loop.
- */
+
+uint8_t correct_uids[6][7] = {
+  {0xC7, 0xA3, 0xC5, 0xA5},
+  {0x19, 0xDA, 0x69, 0x35},
+  //{ 0x04, 0x1D, 0xF6, 0x0A, 0xD7, 0x49, 0x81 },
+  //{ 0x04, 0x3B, 0xE5, 0x0A, 0xD7, 0x49, 0x81 },
+  { 0x04, 0x09, 0xD2, 0x0A, 0xD7, 0x49, 0x81 },
+  { 0x04, 0xE2, 0xF1, 0x0A, 0xD7, 0x49, 0x80 },
+  { 0x04, 0x2C, 0xD6, 0x0A, 0xD7, 0x49, 0x81 },
+  { 0x04, 0xC3, 0xF4, 0x0A, 0xD7, 0x49, 0x80 },
+};
+
+uint8_t reset_uid[7] = { 0x3D, 0xD7, 0xC5, 0xA5 };
+
 void loop() {
- 
-  // iterate through readers. If all readers are in proximity of their paired
-  // card then passed will remain true. One false match will set passed to false.
-  // Preventing the lock from releasing.
-  bool passed = true;
-  for (uint8_t readerNum = 0; readerNum < NR_OF_READERS; readerNum++) {
-    mfrc522[readerNum].PCD_ClearRegisterBitMask(0x01, 1<<4);
-    // wait for PowerDown bit to be cleared to indicate it has woken up
-    while(mfrc522[readerNum].PCD_ReadRegister(0x01) & (1<<4));
-    passed = passed && isMatching(mfrc522[readerNum],cards[readerNum],readerNum);
-    mfrc522[readerNum].PCD_SetRegisterBitMask(0x01, 1<<4);
-    Serial.print("reading Reader - ");
-    Serial.print(readerNum);
-    Serial.print(" - ");
-    Serial.println(passed);
-  }
+  uint8_t all_correct = true;
+  static uint32_t output_set = 0;
+  static uint8_t is_output_set = 0;
   
-  
-  if (passed == true) {
-    Serial.println("Winner Winner Chicken Dinner!");
-  }
-  
-  delay(DELAY_TIME_MILLI);
-}
- 
-bool isMatching(MFRC522 reader, String card, int readerNum) {
-    byte bufferATQA[2];
-    byte bufferSize = sizeof(bufferATQA);
-//    MFRC522::StatusCode result = reader.PICC_RequestA(bufferATQA, &bufferSize);
-    // Look for new cards
-//    if (MFRC522::STATUS_OK == result && reader.PICC_ReadCardSerial()) {
-    if (reader.PICC_IsNewCardPresent() && reader.PICC_ReadCardSerial()) {
+  for (uint8_t reader = 0; reader < NR_OF_READERS; reader++) {
+    uint8_t correct = false;
+    
+    if (mfrc522[reader].PICC_IsNewCardPresent() && mfrc522[reader].PICC_ReadCardSerial()) {
       Serial.print(F("Reader "));
-      Serial.print(readerNum);
+      Serial.print(reader);
       // Show some details of the PICC (that is: the tag/card)
       Serial.print(F(": Card UID:"));
-      String uid = getCardUid(reader);
-      Serial.print(uid);
+      dump_byte_array(mfrc522[reader].uid.uidByte, mfrc522[reader].uid.size);
+      Serial.print("\r\n");
 
-      if(uid == card) {
-        Serial.println("match");
-        return true;
-      } else {
-        Serial.print(uid);
-        Serial.println(" - not a match");
+      correct = true;
+      for(uint8_t i = 0; i < mfrc522[reader].uid.size; i++) {
+        if (mfrc522[reader].uid.uidByte[i] != correct_uids[reader][i]) {
+          correct = false;
+          break;
+        }
       }
+
+      uint8_t is_reset_uid = true;
+      for(uint8_t i = 0; i < mfrc522[reader].uid.size; i++) {
+        if (mfrc522[reader].uid.uidByte[i] != reset_uid[i]) {
+          is_reset_uid = false;
+          break;
+        }
+      }
+
+      if (is_reset_uid) output_set = 0;
+
+      Serial.print("Correct: ");
+      Serial.println(correct ? "YES":"NO");
+
+      // don't halt or stop crypto so that card will still be readable on next cycle
+      // Halt PICC
+      //mfrc522[reader].PICC_HaltA();
+      // Stop encryption on PCD
+      //mfrc522[reader].PCD_StopCrypto1();
     }
-    return false;
+
+    if (!correct) {
+      all_correct = false;
+    }
+  }
+
+  if (all_correct && !is_output_set) {
+    is_output_set = 1;
+    Serial.println("Enabling output=================================================");
+    output_set = millis();
+  }
+
+  
+  // output is set to be infinite or OUTPUT_TIME has not passed since correct set was scanned
+  if ( is_output_set && 
+    ( 
+      (output_set > 0 && (uint32_t) OUTPUT_TIME == (uint32_t) -1) ||
+      ((uint32_t) OUTPUT_TIME < (uint32_t) -1 && (millis() - output_set) < OUTPUT_TIME)
+    )
+  ) {
+    digitalWrite(RX, HIGH);
+  }
+  else {
+    if (is_output_set) {
+      is_output_set = 0;
+      Serial.println("Disabling output================================================");
+    }
+    digitalWrite(RX, LOW);
+  }
 }
- 
+
 /**
  * Helper routine to dump a byte array as hex values to Serial.
  */
@@ -113,22 +126,3 @@ void dump_byte_array(byte *buffer, byte bufferSize) {
     Serial.print(buffer[i], HEX);
   }
 }
- 
-String getCardUid(MFRC522 reader) {
-  String content= "";
-  byte letter;
-  for (byte i = 0; i < reader.uid.size; i++) 
-  {
-     content.concat(String(reader.uid.uidByte[i] < 0x10 ? " 0" : " "));
-     content.concat(String(reader.uid.uidByte[i], HEX));
-  }
-  content.toUpperCase();
-  return content.substring(1);
-}
- 
- 
- 
- 
- 
- 
-
