@@ -5,10 +5,18 @@
 
 // how long to keep output high upon all readers being correct in ms
 // set to -1 for infinite
-#define OUTPUT_TIME -1
+#define OUTPUT_TIME 5000
 
 // refer to https://github.com/esp8266/Arduino/blob/master/variants/d1_mini/pins_arduino.h#L49-L61 for valid pins
-byte ssPins[] = {D8, D0};
+// https://s-media-cache-ak0.pinimg.com/originals/8c/a4/cb/8ca4cbbad2532389362bb8b5fc88df17.png for labelled pins
+// probably D0, RX, D1, D2, D3, D4?
+byte ssPins[] = {RX, D2};
+
+#define OUTPUT_PIN D8
+// state to write to OUTPUT_PIN when its supposed to be activated
+#define OUTPUT_ACTIVE_STATE HIGH
+
+#define LAST_SEEN_THRESHOLD 500
 
 MFRC522 mfrc522[NR_OF_READERS];   // Create MFRC522 instance.
 
@@ -28,6 +36,9 @@ void setup() {
     Serial.print(F(": "));
     mfrc522[reader].PCD_DumpVersionToSerial();
   }
+
+  pinMode(OUTPUT_PIN, OUTPUT);
+  digitalWrite(OUTPUT_PIN, !OUTPUT_ACTIVE_STATE);
 }
 
 uint8_t correct_uids[6][7] = {
@@ -44,7 +55,9 @@ uint8_t correct_uids[6][7] = {
 uint8_t reset_uid[7] = { 0x3D, 0xD7, 0xC5, 0xA5 };
 
 void loop() {
-  uint8_t all_correct = true;
+  // array tracking last seen millis() of each reader
+  static uint32_t last_seen[NR_OF_READERS] = {0};
+  // variable tracking millis() when output was activated
   static uint32_t output_set = 0;
   static uint8_t is_output_set = 0;
   
@@ -80,14 +93,24 @@ void loop() {
       Serial.print("Correct: ");
       Serial.println(correct ? "YES":"NO");
 
+      if (correct) {
+        last_seen[reader] = millis();
+      }
+
       // don't halt or stop crypto so that card will still be readable on next cycle
       // Halt PICC
       //mfrc522[reader].PICC_HaltA();
       // Stop encryption on PCD
       //mfrc522[reader].PCD_StopCrypto1();
     }
+  }
 
-    if (!correct) {
+  uint8_t all_correct = true;
+
+  for(uint8_t i = 0; i < NR_OF_READERS; i++) {
+    // if any reader last_seen is more than LAST_SEEN_THRESHOLD, then not all readers have seen their correct
+    // cards recently
+    if (millis() - last_seen[i] > LAST_SEEN_THRESHOLD) {
       all_correct = false;
     }
   }
@@ -106,14 +129,14 @@ void loop() {
       ((uint32_t) OUTPUT_TIME < (uint32_t) -1 && (millis() - output_set) < OUTPUT_TIME)
     )
   ) {
-    digitalWrite(RX, HIGH);
+    digitalWrite(OUTPUT_PIN, OUTPUT_ACTIVE_STATE);
   }
   else {
     if (is_output_set) {
       is_output_set = 0;
       Serial.println("Disabling output================================================");
     }
-    digitalWrite(RX, LOW);
+    digitalWrite(OUTPUT_PIN, !OUTPUT_ACTIVE_STATE);
   }
 }
 
