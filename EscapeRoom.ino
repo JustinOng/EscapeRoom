@@ -78,10 +78,10 @@ void loop() {
 bool isMatching(MFRC522 reader, String card, int readerNum) {
     byte bufferATQA[2];
     byte bufferSize = sizeof(bufferATQA);
-    MFRC522::StatusCode result = reader.PICC_RequestA(bufferATQA, &bufferSize);
+//    MFRC522::StatusCode result = reader.PICC_RequestA(bufferATQA, &bufferSize);
     // Look for new cards
-    if (MFRC522::STATUS_OK == result && reader.PICC_ReadCardSerial()) {
-//    if (reader.PICC_IsNewCardPresent() && reader.PICC_ReadCardSerial()) {
+//    if (MFRC522::STATUS_OK == result && reader.PICC_ReadCardSerial()) {
+    if (reader.PICC_IsNewCardPresent() && reader.PICC_ReadCardSerial()) {
       Serial.print(F("Reader "));
       Serial.print(readerNum);
       // Show some details of the PICC (that is: the tag/card)
