@@ -60,7 +60,11 @@ void loop() {
   // Preventing the lock from releasing.
   bool passed = true;
   for (uint8_t readerNum = 0; readerNum < NR_OF_READERS; readerNum++) {
+    mfrc522[readerNum].PCD_ClearRegisterBitMask(0x01, 1<<4);
+    // wait for PowerDown bit to be cleared to indicate it has woken up
+    while(mfrc522[readerNum].PCD_ReadRegister(0x01) & (1<<4));
     passed = passed && isMatching(mfrc522[readerNum],cards[readerNum],readerNum);
+    mfrc522[readerNum].PCD_SetRegisterBitMask(0x01, 1<<4);
     Serial.print("reading Reader - ");
     Serial.print(readerNum);
     Serial.print(" - ");
