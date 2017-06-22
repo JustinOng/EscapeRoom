@@ -10,7 +10,7 @@
 // refer to https://github.com/esp8266/Arduino/blob/master/variants/d1_mini/pins_arduino.h#L49-L61 for valid pins
 // https://s-media-cache-ak0.pinimg.com/originals/8c/a4/cb/8ca4cbbad2532389362bb8b5fc88df17.png for labelled pins
 // probably D0, RX, D1, D2, D3, D4?
-byte ssPins[] = {RX, D2};
+byte ssPins[] = {RX, D2, D1};
 
 #define OUTPUT_PIN D8
 // state to write to OUTPUT_PIN when its supposed to be activated
@@ -54,6 +54,8 @@ uint8_t correct_uids[6][7] = {
 
 uint8_t reset_uid[7] = { 0x3D, 0xD7, 0xC5, 0xA5 };
 
+uint8_t wildcard_uid[7] = { 0xC7, 0xA3, 0xC5, 0xA5 };
+
 void loop() {
   // array tracking last seen millis() of each reader
   static uint32_t last_seen[NR_OF_READERS] = {0};
@@ -77,6 +79,21 @@ void loop() {
         if (mfrc522[reader].uid.uidByte[i] != correct_uids[reader][i]) {
           correct = false;
           break;
+        }
+      }
+
+      if (!correct) {
+        uint8_t wildcard_correct = true;
+        
+        for(uint8_t i = 0; i < mfrc522[reader].uid.size; i++) {
+          if (mfrc522[reader].uid.uidByte[i] != wildcard_uid[i]) {
+            wildcard_correct = false;
+            break;
+          }
+        }
+
+        if (wildcard_correct) {
+          correct = true;
         }
       }
 
